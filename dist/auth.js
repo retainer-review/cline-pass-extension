@@ -150,9 +150,15 @@ async function pollDeviceAuthorization(fetchImpl, authorization, callbacks) {
             await wait(intervalSeconds * 1000, callbacks.signal);
             continue;
         }
+        if (error === "access_denied") {
+            throw new Error("Cline device authorization was denied in the browser. Run /login again if that was unexpected.");
+        }
+        if (error === "expired_token" || error === "expired_code") {
+            throw new Error("The Cline verification code expired before the browser sign-in finished. Run /login again.");
+        }
         throw new Error(`Cline device authentication failed: HTTP ${response.status}${apiErrorSuffix(payload)}`);
     }
-    throw new Error("Cline device authorization timed out. Run /login again.");
+    throw new Error(`Cline device authorization timed out after ${authorization.expiresInSeconds} seconds. Run /login again.`);
 }
 async function registerClineCredentials(fetchImpl, tokens, authBase, signal) {
     const response = await fetchImpl(`${authBase}${CLINE_REGISTER_PATH}`, {
@@ -228,13 +234,13 @@ export async function readProviderSettings(providersPath) {
         data = await fs.readFile(providersPath, "utf8");
     }
     catch (error) {
-        throw new Error(`Unable to read Cline providers.json at ${providersPath}: ${safeError(error)}`);
+        throw new Error(`Unable to read Cline providers.json at ${providersPath}: ${safeError(error)}`, { cause: error });
     }
     try {
         return JSON.parse(data);
     }
     catch (error) {
-        throw new Error(`Unable to parse Cline providers.json at ${providersPath}: ${safeError(error)}`);
+        throw new Error(`Unable to parse Cline providers.json at ${providersPath}: ${safeError(error)}`, { cause: error });
     }
 }
 export function findClinePassProvider(settings) {

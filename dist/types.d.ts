@@ -164,6 +164,7 @@ export interface VerifyOptions {
     model?: string;
     baseUrl?: string;
     fetchImpl?: FetchLike;
+    timeoutMs?: number;
     json?: boolean;
 }
 export interface VerifyResult {

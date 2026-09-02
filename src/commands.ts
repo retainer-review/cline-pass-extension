@@ -38,26 +38,34 @@ export async function doctorClinePass(env: Env = process.env): Promise<DoctorRes
     return { ok: checks.every(check => check.ok), command: "doctor", providersPath, checks };
   }
 
-  let settings: ClineSettings;
+  let settings: ClineSettings | undefined;
   try {
     settings = await readProviderSettings(providersPath);
     checks.push({ name: "providers.json", ok: true, detail: providersPath });
   } catch (error) {
-    checks.push({ name: "providers.json", ok: false, detail: safeError(error) });
-    return { ok: false, command: "doctor", providersPath, checks };
+    if (isMissingFile(error)) {
+      checks.push({ name: "providers.json", ok: true, detail: "not found (expected before the first Cline login)" });
+    } else {
+      checks.push({ name: "providers.json", ok: false, detail: safeError(error) });
+      return { ok: false, command: "doctor", providersPath, checks };
+    }
   }
 
   const provider = findClineAuthProviderEntry(settings);
   checks.push({
     name: "provider",
     ok: Boolean(provider),
-    detail: provider ? `${provider.settings.provider || provider.key} provider found` : "cline/cline-pass provider not found",
+    detail: provider
+      ? `${provider.settings.provider || provider.key} provider found`
+      : "cline/cline-pass provider not found. Run /login and choose Cline Pass.",
   });
 
   checks.push({
     name: "access token",
     ok: Boolean(stringValue(provider?.auth?.accessToken)),
-    detail: stringValue(provider?.auth?.accessToken) ? "present" : "missing",
+    detail: stringValue(provider?.auth?.accessToken)
+      ? "present"
+      : "missing. Run /login and choose Cline Pass, or set CLINE_PASS_API_KEY.",
   });
 
   const expiry = describeExpiry(provider?.auth?.expiresAt);
@@ -80,6 +88,7 @@ export async function verifyClinePass(options: VerifyOptions = {}, env: Env = pr
 
   const model = options.model || env.CLINE_PASS_MODEL || DEFAULT_MODEL;
   const baseUrl = options.baseUrl || env.CLINE_PASS_API_BASE || CLINE_API_BASE;
+  const timeoutMs = positiveTimeout(options.timeoutMs);
   let token: string;
   try {
     token = await resolveRuntimeApiKey({ baseUrl, fetchImpl }, env);
@@ -119,13 +128,16 @@ export async function verifyClinePass(options: VerifyOptions = {}, env: Env = pr
         temperature: 0,
         max_tokens: 32,
       }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     return {
       ok: false,
       command: "verify",
       status: 0,
-      detail: safeError(error),
+      detail: timedOut(error)
+        ? `verification request timed out after ${formatSeconds(timeoutMs)}. Check your network connection and try again.`
+        : safeError(error),
       model,
       baseUrl,
     };
@@ -240,9 +252,28 @@ export async function runClinePassCommand(args: string, env: Env = process.env):
   return { ...result, json: Boolean(options.json) };
 }
 
+const VERIFY_REQUEST_TIMEOUT_MS = 60_000;
+
+function positiveTimeout(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : VERIFY_REQUEST_TIMEOUT_MS;
+}
+
+function timedOut(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : "";
+  return name === "TimeoutError" || name === "AbortError";
+}
+
+function formatSeconds(ms: number): string {
+  return ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms / 1000}s`;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return Boolean(error instanceof Error && (error as { cause?: { code?: string } }).cause?.code === "ENOENT");
+}
+
 export function commandUsage(): string {
   return [
-    "Usage: /clinepass <doctor|verify|models> [options]",
+    "Usage: /clinepass <doctor|verify|models|help> [options]",
     "",
     "Options:",
     "  --model <id>      Verification model",

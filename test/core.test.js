@@ -305,6 +305,68 @@ test("OMP OAuth adapter uses Cline's device authorization flow", async () => {
   assert.equal(getClinePassApiKey(credentials), "workos:cline-access");
 });
 
+test("OMP OAuth adapter explains a denied device authorization", async () => {
+  await withProcessEnv(
+    {
+      CLINE_PASS_API_KEY: "",
+      CLINE_API_KEY: "",
+      CLINE_PASS_IMPORT_LOCAL: "",
+      CLINE_PASS_API_BASE: "",
+      CLINE_API_BASE_URL: "",
+    },
+    () =>
+      assert.rejects(
+        loginClinePass({
+          onAuth: async () => {},
+          fetch: async url => {
+            if (url === "https://api.workos.com/user_management/authorize/device") {
+              return jsonResponse({
+                device_code: "device-code-1",
+                user_code: "USER-CODE",
+                verification_uri: "https://auth.cline.test/device",
+                expires_in: 300,
+                interval: 1,
+              });
+            }
+            return jsonResponse({ error: "access_denied" }, { status: 400 });
+          },
+        }),
+        /denied in the browser/,
+      ),
+  );
+});
+
+test("OMP OAuth adapter explains an expired verification code", async () => {
+  await withProcessEnv(
+    {
+      CLINE_PASS_API_KEY: "",
+      CLINE_API_KEY: "",
+      CLINE_PASS_IMPORT_LOCAL: "",
+      CLINE_PASS_API_BASE: "",
+      CLINE_API_BASE_URL: "",
+    },
+    () =>
+      assert.rejects(
+        loginClinePass({
+          onAuth: async () => {},
+          fetch: async url => {
+            if (url === "https://api.workos.com/user_management/authorize/device") {
+              return jsonResponse({
+                device_code: "device-code-1",
+                user_code: "USER-CODE",
+                verification_uri: "https://auth.cline.test/device",
+                expires_in: 300,
+                interval: 1,
+              });
+            }
+            return jsonResponse({ error: "expired_token" }, { status: 400 });
+          },
+        }),
+        /expired before the browser sign-in/,
+      ),
+  );
+});
+
 test("OMP OAuth adapter can import local Cline credentials when opted in", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cline-pass-ext-"));
   const source = path.join(tempDir, "providers.json");
@@ -396,6 +458,23 @@ test("doctor reports missing and present ClinePass login status", async () => {
   assert.equal(JSON.stringify(report).includes("token-1"), false);
 });
 
+test("doctor guides a first-run user when Cline providers.json is missing", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cline-pass-ext-"));
+
+  const report = await doctorClinePass({
+    CLINE_PROVIDERS_JSON: path.join(tempDir, "missing-providers.json"),
+    [CLINE_PASS_OMP_AGENT_DB_ENV_VAR]: path.join(tempDir, "missing-agent.db"),
+  });
+
+  assert.equal(report.ok, false);
+  const providersCheck = report.checks.find(check => check.name === "providers.json");
+  assert.equal(providersCheck.ok, true);
+  assert.match(providersCheck.detail, /not found/);
+  assert.match(report.checks.find(check => check.name === "provider").detail, /\/login/);
+  assert.match(report.checks.find(check => check.name === "access token").detail, /CLINE_PASS_API_KEY/);
+  assert.doesNotMatch(JSON.stringify(report.checks), /ENOENT|no such file/);
+});
+
 test("doctor reports saved OMP /login credentials without exposing them", async () => {
   if (!hasSqlite3()) return;
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "cline-pass-ext-"));
@@ -484,6 +563,23 @@ test("verifyClinePass returns structured network failures", async () => {
   assert.equal(report.command, "verify");
   assert.equal(report.status, 0);
   assert.match(report.detail, /network unavailable/);
+});
+
+test("verifyClinePass times out stalled requests with a friendly message", async () => {
+  const report = await verifyClinePass(
+    {
+      timeoutMs: 100,
+      fetchImpl: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal.reason ?? new Error("aborted")), { once: true });
+        }),
+    },
+    { CLINE_PASS_API_KEY: "token-1" },
+  );
+
+  assert.equal(report.ok, false);
+  assert.match(report.detail, /timed out after/);
+  assert.match(report.detail, /try again/);
 });
 
 test("verifyClinePass unwraps Cline success envelopes", async () => {
@@ -1248,6 +1344,9 @@ test("extension command completions and JSON errors are scoped", async () => {
   });
 
   assert.equal(commands.clinepass.getArgumentCompletions("verify --model ").some(item => item.value === "glm-5.2"), true);
+  assert.equal(commands.clinepass.getArgumentCompletions("verify --model=").some(item => item.value === "glm-5.2"), true);
+  assert.equal(commands.clinepass.getArgumentCompletions("verify --model=glm").some(item => item.value === "glm-5.2"), true);
+  assert.equal(commands.clinepass.getArgumentCompletions("verify ").some(item => item.value === "--json"), true);
   assert.equal(
     commands.clinepass.getArgumentCompletions("verify --model glm-5.2 --json").every(item => item.value.startsWith("--")),
     true,

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Time out `/clinepass verify` requests so a stalled network cannot hang the
+  command, and report a friendly timeout instead of an opaque failure.
+- Make first-run `/clinepass doctor` output actionable: a missing Cline
+  `providers.json` is reported as expected before the first Cline login, and
+  missing-provider or missing-token checks point to `/login` or
+  `CLINE_PASS_API_KEY` instead of raw ENOENT noise.
+- Explain device-authorization denial and verification-code expiry in `/login`
+  instead of a generic HTTP error, and include the wait window in the timeout
+  message.
+- Suggest command options when tab-completing after a `clinepass` subcommand,
+  and complete `--model=` prefixes.
 - Replace the removed personal-dashboard API-key URL with Cline's current
   WorkOS device-authorization flow, including Cline account token exchange and
   refresh support for OMP/Pi `/login` credentials, without repeating the

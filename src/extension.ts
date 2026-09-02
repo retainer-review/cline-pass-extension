@@ -78,11 +78,12 @@ function argumentCompletions(prefix: string): CompletionItem[] {
 
   const last = tokens[tokens.length - 1] || "";
   const previous = tokens[tokens.length - 2] || "";
-  if (last === "--model" || previous === "--model") {
-    const query = last === "--model" ? "" : last;
+  if (last === "--model" || previous === "--model" || last.startsWith("--model=")) {
+    const query = last.startsWith("--model=") ? last.slice("--model=".length) : last === "--model" ? "" : last;
     return CLINE_PASS_MODELS.map(model => ({ value: model.id, label: model.name })).filter(item =>
       item.value.startsWith(query),
     );
   }
+  if (!last.startsWith("--")) return ["--model", "--base-url", "--json"].map(value => ({ value, label: value }));
   return ["--model", "--base-url", "--json"].filter(value => value.startsWith(last)).map(value => ({ value, label: value }));
 }
